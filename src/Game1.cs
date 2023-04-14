@@ -4,17 +4,29 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Runtime;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using System.Reflection;
 
 namespace eXNB
 {
     internal class Game1 : Game
     {
-        public GraphicsDeviceManager graphics;
+        public static GraphicsDeviceManager graphics;
+        public static string[] args;
+        public static string inputDir = "Content";
+        public static string outputDir = "Content";
 
-        public Game1()
+        public Game1(string[] programArgs)
         {
+            args = programArgs;
+
+            string newInputDir = GetArgument("-i");
+            string newOutputDir = GetArgument("-o");
+            inputDir = newInputDir.Length > 0 ? newInputDir : inputDir;
+            outputDir = newOutputDir.Length > 0 ? newOutputDir : outputDir;
+
             graphics = new GraphicsDeviceManager(this);
             graphics.PreferredBackBufferWidth = 1;
             graphics.PreferredBackBufferHeight = 1;
@@ -22,16 +34,32 @@ namespace eXNB
 
         protected override void LoadContent()
         {
-            DirectoryInfo rootDir = new DirectoryInfo(@"./Content/");
-            List<string> texture_files = new List<string>();
-            WalkDirectoryTree(rootDir, texture_files, "xnb");
+            if (!Directory.Exists(inputDir))
+            {
+                Log("ERROR", $"Input directory \"{inputDir}\" does not exist.");
+                Exit();
+                return;
+            }
 
-            foreach (string file in texture_files)
+            DirectoryInfo rootDir = new DirectoryInfo($@"{inputDir}");
+            List<FileInfo> textureFiles = new List<FileInfo>();
+            List<string> erroredFiles = new List<string>();
+            WalkDirectoryTree(rootDir, textureFiles, "xnb");
+            int completed = 0;
+
+            foreach (FileInfo file in textureFiles)
             {
                 try
                 {
-                    Texture2D temp = Content.Load<Texture2D>($@"{file}");
-                    Console.WriteLine($"[ INFO ] : {file} loaded...");
+                    if (!file.Exists)
+                    {
+                        erroredFiles.Add($"File \"{file.FullName}\" does not exist. Skipping...");
+                        continue;
+                    }
+
+                    long fileStart = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                    Texture2D temp = Content.Load<Texture2D>($@"{file.FullName}");
 
                     //Fix colors (use hardware eventually)
                     Bitmap temp_img = Texture2Image(temp);
@@ -47,29 +75,38 @@ namespace eXNB
                         }
                     }
 
-                    Console.WriteLine($"[ INFO ] : {file} colors fixed...");
                     temp = GetTexture2DFromBitmap(graphics.GraphicsDevice, temp_img);
 
                     //Write file
-                    string png = file.Replace(".xnb", ".png");
+                    string png = $"{file.FullName.Replace(".xnb", ".png")}";
                     Stream o = File.Create(png);
                     temp.SaveAsPng(o, temp.Width, temp.Height);
-                    Console.WriteLine($"[ INFO ] : {png} completed!");
+                    ++completed;
+
+                    Console.SetCursorPosition(0, 5);
+                    Console.Write($"     - Processing... {completed}/{textureFiles.Count}");
+                    Console.SetCursorPosition(0, 6);
+                    Console.Write($"     - {erroredFiles.Count} Error(s)");
 
                     temp.Dispose();
                     o.Dispose();
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"[ ERROR ] : {e.Message}");
+                    erroredFiles.Add(e.Message);
                 }
+            }
+
+            foreach(string em in erroredFiles)
+            {
+                Log("ERROR", em);
             }
 
             Exit();
         }
 
         //https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/file-system/how-to-iterate-through-a-directory-tree
-        static void WalkDirectoryTree(DirectoryInfo root, List<string> file_list, string ext = "*")
+        static void WalkDirectoryTree(DirectoryInfo root, List<FileInfo> file_list, string ext = "*")
         {
             FileInfo[] files = null;
             DirectoryInfo[] subDirs = null;
@@ -78,20 +115,16 @@ namespace eXNB
             {
                 files = root.GetFiles($"*.{ext}");
             }
-            catch (UnauthorizedAccessException e)
+            catch (Exception e)
             {
-                Console.WriteLine(e.Message);
-            }
-            catch (DirectoryNotFoundException e)
-            {
-                Console.WriteLine(e.Message);
+                Log("ERROR", e.Message);
             }
 
             if (files != null)
             {
                 foreach (FileInfo fi in files)
                 {
-                    file_list.Add(fi.FullName);
+                    file_list.Add(fi);
                 }
 
                 subDirs = root.GetDirectories();
@@ -127,6 +160,28 @@ namespace eXNB
             tex.SetData(bytes);
             bitmap.UnlockBits(data);
             return tex;
+        }
+
+        public static string GetArgument(string arg)
+        {
+            for(int i = 0; i < args.Length; ++i)
+            {
+                if (args[i] == arg && args.Length > i + 1)
+                {
+                    return args[i + 1];
+                }
+            }
+
+            return "";
+        }
+
+
+        public static void Log(string prefix, string message)
+        {
+#if !DEBUG
+            if(prefix == "DEBUG") return;
+#endif
+            Console.WriteLine($"[ {prefix} ]: {message}");
         }
     }
 }

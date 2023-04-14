@@ -8,9 +8,11 @@ namespace eXNB
 {
     internal class Program
     {
-        public static Game1 game = new Game1();
+        public static Game1 game;
         static void Main(string[] args)
         {
+            game = new Game1(args);
+
             using (game)
             {
                 game.Run();
